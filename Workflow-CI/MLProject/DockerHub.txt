@@ -1,0 +1,19 @@
+Tautan Docker Hub Image:
+https://hub.docker.com/r/<docker_username>/smartphone-addiction-ml
+
+Cara build dan push Docker image menggunakan MLflow:
+    mlflow models build-docker \
+        --model-uri "runs:/<run_id>/model" \
+        --name "smartphone-addiction-ml"
+
+    docker tag smartphone-addiction-ml <docker_username>/smartphone-addiction-ml:latest
+    docker push <docker_username>/smartphone-addiction-ml:latest
+
+Cara pull dan run image:
+    docker pull <docker_username>/smartphone-addiction-ml:latest
+    docker run -p 5001:8080 <docker_username>/smartphone-addiction-ml:latest
+
+Catatan:
+- Ganti <docker_username> dengan username Docker Hub Anda
+- Ganti <run_id> dengan Run ID dari MLflow yang ingin di-deploy
+- Image sudah include model + dependencies otomatis dari MLflow
