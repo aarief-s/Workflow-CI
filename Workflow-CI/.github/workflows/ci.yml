@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - 'Workflow-CI/MLProject/**'
+      - 'working-directory: Workflow-CI/MLProject'
   schedule:
     - cron: '0 8 * * 1'
 
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: MLProject
+        working-directory: Workflow-CI/MLProject
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
