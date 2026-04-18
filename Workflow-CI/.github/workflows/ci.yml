@@ -1,133 +1,61 @@
-name: CI — MLflow Training Pipeline (Lufthi Arief Syabana)
+name: CI - MLflow Training Pipeline (Lufthi Arief Syabana)
 
 on:
-  # Trigger manual
   workflow_dispatch:
-    inputs:
-      n_estimators:
-        description: 'Jumlah estimators Random Forest'
-        required: false
-        default: '100'
-      max_depth:
-        description: 'Max depth Random Forest'
-        required: false
-        default: '10'
-
-  # Trigger otomatis saat push ke main menyentuh file model/data
   push:
     branches:
       - main
     paths:
-      - 'MLProject/**'
-
-  # Jadwal: setiap Senin pukul 08:00 UTC
+      - 'Workflow-CI/MLProject/**'
   schedule:
     - cron: '0 8 * * 1'
 
-env:
-  PYTHON_VERSION: '3.12'
-  MLFLOW_VERSION: '2.19.0'
-
 jobs:
-  # ════════════════════════════════════════════════════════════════
-  # JOB 1: Training Model dengan MLflow Project
-  # ════════════════════════════════════════════════════════════════
   train:
     name: Train Model (MLflow Project)
     runs-on: ubuntu-latest
-
     defaults:
       run:
-        working-directory: MLProject
-
+        working-directory: Workflow-CI/MLProject
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ── 2. Setup Python ──────────────────────────────────────────
-      - name: Set Up Python ${{ env.PYTHON_VERSION }}
+      - name: Set Up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          python-version: '3.12'
 
-      # ── 3. Install dependencies ──────────────────────────────────
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            mlflow==${{ env.MLFLOW_VERSION }} \
-            pandas==2.2.2 \
-            numpy==1.26.4 \
-            scikit-learn==1.5.1 \
-            matplotlib==3.9.2 \
-            seaborn==0.13.2 \
-            joblib==1.4.2
+          pip install mlflow==2.19.0 pandas==2.2.2 numpy==1.26.4 scikit-learn==1.5.1 matplotlib==3.9.2 seaborn==0.13.2 joblib==1.4.2
 
-      # ── 4. Verifikasi dataset ─────────────────────────────────────
-      - name: Verify Dataset
-        run: |
-          echo "=== Dataset files ==="
-          ls -lh smartphone_usage_preprocessing/
-          echo ""
-          echo "=== Train shape ==="
-          python -c "
-          import pandas as pd
-          train = pd.read_csv('smartphone_usage_preprocessing/train.csv')
-          test  = pd.read_csv('smartphone_usage_preprocessing/test.csv')
-          print(f'Train: {train.shape} | Test: {test.shape}')
-          print(f'Columns: {list(train.columns)}')
-          "
-
-      # ── 5. Jalankan MLflow Project ────────────────────────────────
       - name: Run MLflow Project
         env:
           MLFLOW_TRACKING_URI: mlruns
         run: |
-          mlflow run . \
-            --env-manager local \
-            --experiment-name Smartphone_Addiction_CI \
-            -P n_estimators=${{ github.event.inputs.n_estimators || '100' }} \
-            -P max_depth=${{ github.event.inputs.max_depth || '10' }} \
-            -P min_samples_split=2 \
-            -P max_features=sqrt \
-            -P random_state=42
+          mlflow run . --env-manager local --experiment-name Smartphone_Addiction_CI -P n_estimators=100 -P max_depth=10 -P random_state=42
 
-      # ── 6. Verifikasi output ──────────────────────────────────────
-      - name: Verify Model Output
-        run: |
-          echo "=== Model output ==="
-          ls -lh model_output/ || echo "model_output not found"
-          echo ""
-          echo "=== Artifacts ==="
-          ls -lh artifacts_ci/ || echo "artifacts_ci not found"
-          echo ""
-          echo "=== Run ID ==="
-          cat model_output/run_id.txt || echo "run_id.txt not found"
-
-      # ── 7. Upload artefak ke GitHub ───────────────────────────────
-      - name: Upload Model Artifacts to GitHub
+      - name: Upload Model Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: model-artifacts-${{ github.run_number }}
           path: |
-            MLProject/model_output/
-            MLProject/artifacts_ci/
-            MLProject/mlruns/
+            Workflow-CI/MLProject/model_output/
+            Workflow-CI/MLProject/artifacts_ci/
           retention-days: 30
 
-      # ── 8. Commit artefak kembali ke repo ─────────────────────────
-      - name: Commit Model Artifacts to Repository
+      - name: Commit Artifacts to Repository
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          mkdir -p ../model_artifacts
-          cp -r model_output/ ../model_artifacts/ 2>/dev/null || true
-          cp -r artifacts_ci/ ../model_artifacts/ 2>/dev/null || true
-          git add ../model_artifacts/ 2>/dev/null || true
-          git diff --staged --quiet || \
-            git commit -m "ci: save model artifacts run #${{ github.run_number }} [skip ci]"
+          mkdir -p ../../model_artifacts
+          cp -r model_output/ ../../model_artifacts/ 2>/dev/null || true
+          cp -r artifacts_ci/ ../../model_artifacts/ 2>/dev/null || true
+          cd ../..
+          git add model_artifacts/ 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "ci: save model artifacts run #${{ github.run_number }} [skip ci]"
 
       - name: Push Artifacts
         uses: ad-m/github-push-action@v0.8.0
@@ -135,93 +63,44 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
 
-  # ════════════════════════════════════════════════════════════════
-  # JOB 2: Build Docker Image & Push ke Docker Hub (Advance)
-  # ════════════════════════════════════════════════════════════════
   docker:
-    name: Build & Push Docker Image
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
     needs: train
-
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ── 2. Setup Python ──────────────────────────────────────────
-      - name: Set Up Python ${{ env.PYTHON_VERSION }}
+      - name: Set Up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.12'
 
-      # ── 3. Install MLflow ─────────────────────────────────────────
       - name: Install MLflow
-        run: pip install mlflow==${{ env.MLFLOW_VERSION }} scikit-learn joblib
+        run: pip install mlflow==2.19.0 scikit-learn joblib
 
-      # ── 4. Download artefak dari job train ───────────────────────
       - name: Download Model Artifacts
         uses: actions/download-artifact@v4
         with:
           name: model-artifacts-${{ github.run_number }}
-          path: MLProject/
+          path: Workflow-CI/MLProject/
 
-      # ── 5. Setup Docker Buildx ────────────────────────────────────
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # ── 6. Login ke Docker Hub ────────────────────────────────────
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # ── 7. Build Docker image dengan mlflow build-docker ─────────
-      - name: Build Docker Image via MLflow
-        working-directory: MLProject
+      - name: Build Docker Image
+        working-directory: Workflow-CI/MLProject
         run: |
           RUN_ID=$(cat model_output/run_id.txt)
-          echo "Building Docker image for Run ID: $RUN_ID"
-          mlflow models build-docker \
-            --model-uri "runs:/${RUN_ID}/model" \
-            --name "${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml"
+          mlflow models build-docker --model-uri "runs:/${RUN_ID}/model" --name "${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml"
 
-      # ── 8. Tag dan Push ke Docker Hub ─────────────────────────────
-      - name: Tag & Push to Docker Hub
+      - name: Push to Docker Hub
         run: |
-          docker tag \
-            ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest \
-            ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:run-${{ github.run_number }}
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:run-${{ github.run_number }}
-          echo "✅ Docker image pushed:"
-          echo "   latest : ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest"
-          echo "   tagged : ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:run-${{ github.run_number }}"
-
-      # ── 9. Update DockerHub.txt dengan link terbaru ───────────────
-      - name: Update DockerHub.txt
-        run: |
-          cat > MLProject/DockerHub.txt << EOF
-          Tautan Docker Hub Image:
-          https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml
-
-          Tags tersedia:
-          - latest  → image terbaru
-          - run-${{ github.run_number }} → build dari CI run #${{ github.run_number }}
-
-          Cara pull dan run:
-              docker pull ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest
-              docker run -p 5001:8080 ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest
-          EOF
-
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add MLProject/DockerHub.txt
-          git diff --staged --quiet || \
-            git commit -m "ci: update DockerHub link run #${{ github.run_number }} [skip ci]"
-
-      - name: Push DockerHub.txt Update
-        uses: ad-m/github-push-action@v0.8.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
+          echo "Docker image pushed successfully"
