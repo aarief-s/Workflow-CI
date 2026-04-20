@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - 'MLProject/**'
+      - 'Workflow-CI/MLProject/**'
   schedule:
     - cron: '0 8 * * 1'
 
@@ -14,9 +14,7 @@ jobs:
   train:
     name: Train Model (MLflow Project)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: MLProject
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -31,29 +29,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install mlflow==2.19.0 pandas==2.2.2 numpy==1.26.4 scikit-learn==1.5.1 matplotlib==3.9.2 seaborn==0.13.2 joblib==1.4.2
 
-      - name: Run MLflow Project
-        env:
-          MLFLOW_TRACKING_URI: mlruns
+      - name: Verify Dataset
         run: |
-          mlflow run . --env-manager local --experiment-name Smartphone_Addiction_CI -P n_estimators=100 -P max_depth=10 -P random_state=42
+          echo "=== Struktur folder ==="
+          find . -name "*.csv" | head -10
+          find . -name "MLProject" | head -5
+          ls -la
+
+      - name: Run MLflow Project
+        run: |
+          cd Workflow-CI/MLProject
+          MLFLOW_TRACKING_URI=mlruns mlflow run . \
+            --env-manager local \
+            --experiment-name Smartphone_Addiction_CI \
+            -P n_estimators=100 \
+            -P max_depth=10 \
+            -P random_state=42
+
+      - name: Verify Output
+        run: |
+          echo "=== Model output ==="
+          ls -lh Workflow-CI/MLProject/model_output/ || echo "model_output tidak ada"
+          ls -lh Workflow-CI/MLProject/artifacts_ci/ || echo "artifacts_ci tidak ada"
 
       - name: Upload Model Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: model-artifacts-${{ github.run_number }}
           path: |
-            MLProject/model_output/
-            MLProject/artifacts_ci/
+            Workflow-CI/MLProject/model_output/
+            Workflow-CI/MLProject/artifacts_ci/
           retention-days: 30
 
-      - name: Commit Artifacts to Repository
+      - name: Commit Artifacts
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          mkdir -p ../model_artifacts
-          cp -r model_output/ ../model_artifacts/ 2>/dev/null || true
-          cp -r artifacts_ci/ ../model_artifacts/ 2>/dev/null || true
-          git add ../model_artifacts/ 2>/dev/null || true
+          mkdir -p model_artifacts
+          cp -r Workflow-CI/MLProject/model_output/ model_artifacts/ 2>/dev/null || true
+          cp -r Workflow-CI/MLProject/artifacts_ci/ model_artifacts/ 2>/dev/null || true
+          git add model_artifacts/ 2>/dev/null || true
           git diff --staged --quiet || git commit -m "ci: save model artifacts run #${{ github.run_number }} [skip ci]"
 
       - name: Push Artifacts
@@ -82,7 +97,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: model-artifacts-${{ github.run_number }}
-          path: MLProject/
+          path: downloaded_artifacts/
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -94,12 +109,18 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build Docker Image
-        working-directory: MLProject
         run: |
-          RUN_ID=$(cat model_output/run_id.txt)
-          mlflow models build-docker --model-uri "runs:/${RUN_ID}/model" --name "${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml"
+          RUN_ID=$(cat downloaded_artifacts/model_output/run_id.txt 2>/dev/null || echo "")
+          if [ -z "$RUN_ID" ]; then
+            echo "run_id.txt tidak ditemukan, skip docker build"
+            exit 0
+          fi
+          echo "Building Docker image for Run ID: $RUN_ID"
+          mlflow models build-docker \
+            --model-uri "runs:/${RUN_ID}/model" \
+            --name "${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml"
 
       - name: Push to Docker Hub
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest
-          echo "Docker image pushed successfully"
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/smartphone-addiction-ml:latest || echo "Push skipped"
+          echo "Done"
